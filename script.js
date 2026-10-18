@@ -17,6 +17,9 @@ const telegramWebApp = window.Telegram?.WebApp;
 const telegramUserStorageKey = 'vyrn.telegram.user.v1';
 const supabaseProjectUrl = 'https://umhrceixwdakatnozccz.supabase.co';
 const supabasePublishableKey = 'sb_publishable_PMGG6X6eBVsfTAcAwH6qzg_r65ZF4rc';
+const supabaseClient = window.supabase?.createClient(supabaseProjectUrl, supabasePublishableKey, {
+	auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+}) ?? null;
 const getTelegramUser = () => {
 	let telegramUser = telegramWebApp?.initDataUnsafe?.user;
 	if (!telegramUser) {
@@ -61,34 +64,49 @@ const profileDataFromSupabase = (profile) => ({
 	avatar: profile.photo_url || ''
 });
 const syncSupabaseProfile = async (profileData) => {
-	if (!telegramWebApp?.initData) {
-		throw new Error('Telegram initData is unavailable.');
+	if (!supabaseClient || !telegramUser) {
+		throw new Error('Supabase client or Telegram user is unavailable.');
 	}
-	const body = { initData: telegramWebApp.initData };
+	const telegramProfile = {
+		telegram_id: telegramUser.id,
+		telegram_username: telegramUser.username || null,
+		telegram_first_name: telegramUser.first_name,
+		telegram_last_name: telegramUser.last_name || '',
+		language_code: telegramUser.language_code || null,
+		is_premium: telegramUser.is_premium === true,
+		photo_url: telegramUser.photo_url || null,
+		nickname: telegramUser.username || telegramUser.first_name,
+		profile_first_name: telegramUser.first_name,
+		profile_last_name: telegramUser.last_name || ''
+	};
+	const { error: insertError } = await supabaseClient
+		.from('telegram_profiles')
+		.upsert(telegramProfile, { onConflict: 'telegram_id', ignoreDuplicates: true });
+	if (insertError) throw insertError;
+
 	if (profileData) {
-		body.profile = {
-			firstName: profileData.firstName,
-			lastName: profileData.lastName,
-			about: profileData.about,
-			username: profileData.username,
-			birthday: profileData.birthday,
-			phone: profileData.phone
-		};
+		const nickname = profileData.username.replace(/^@+/, '') || telegramUser.username || telegramUser.first_name;
+		const { error: updateError } = await supabaseClient
+			.from('telegram_profiles')
+			.update({
+				nickname,
+				profile_first_name: profileData.firstName,
+				profile_last_name: profileData.lastName,
+				about: profileData.about,
+				birthday: profileData.birthday || null,
+				phone: profileData.phone
+			})
+			.eq('telegram_id', telegramUser.id);
+		if (updateError) throw updateError;
 	}
-	const response = await fetch(`${supabaseProjectUrl}/functions/v1/telegram-auth`, {
-		method: 'POST',
-		headers: {
-			apikey: supabasePublishableKey,
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify(body)
-	});
-	const result = await response.json().catch(() => ({}));
-	if (!response.ok || !result.profile) {
-		throw new Error(result.error || 'Supabase profile sync failed.');
-	}
-	supabaseAccountProfile = result.profile;
-	const balance = Number(result.profile.stars_balance);
+	const { data: profile, error: selectError } = await supabaseClient
+		.from('telegram_profiles')
+		.select('*')
+		.eq('telegram_id', telegramUser.id)
+		.single();
+	if (selectError) throw selectError;
+	supabaseAccountProfile = profile;
+	const balance = Number(profile.stars_balance);
 	if (Number.isSafeInteger(balance) && balance >= 0) {
 		document.querySelectorAll('.star-balance').forEach((element) => {
 			const value = element.querySelector('span');
@@ -98,10 +116,10 @@ const syncSupabaseProfile = async (profileData) => {
 		const walletBalance = document.querySelector('[data-wallet-balance]');
 		if (walletBalance) walletBalance.textContent = balance.toLocaleString('ru-RU');
 	}
-	document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: result.profile }));
-	return result.profile;
+	document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: profile }));
+	return profile;
 };
-if (telegramWebApp?.initData) {
+if (supabaseClient && telegramUser) {
 	syncSupabaseProfile().catch((error) => console.error('Supabase profile sync failed:', error));
 }
 const avatarName = [storedProfile?.firstName, storedProfile?.lastName]
