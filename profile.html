@@ -4,11 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Профиль | VYRN</title>
-  <link rel="stylesheet" href="style.css?v=profile-editor-avatar-scroll-2-20261017">
+  <link rel="stylesheet" href="style.css?v=seller-profile-20261018">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=supabase-telegram-profile-20261018" defer></script>
+  <script src="supabase-config.js?v=admin-gift-catalog-20261018"></script>
+  <script src="nft-catalog.js?v=admin-gift-catalog-20261018"></script>
+  <script src="script.js?v=seller-profile-20261018" defer></script>
 </head>
 <body>
   <main class="profile-page">
@@ -105,8 +107,19 @@
           <div><dt>Владелец</dt><dd class="nft-modal-owner"></dd></div>
           <div><dt>Коллекция</dt><dd>VYRN</dd></div>
           <div><dt>Модель</dt><dd class="nft-modal-model"></dd></div>
-          <div><dt>Стоимость</dt><dd class="nft-modal-price">—</dd></div>
+          <div><dt>Ценность</dt><dd class="nft-modal-price">—</dd></div>
+          <div class="nft-modal-listing-payout-row" hidden><dt>Получите</dt><dd><span class="nft-modal-listing-payout">—</span><img class="nft-modal-payout-icon" src="stars.png" alt="" aria-hidden="true"></dd></div>
         </dl>
+        <p class="nft-modal-action-status" role="status" hidden></p>
+        <button class="nft-modal-sell" type="button" hidden>ПРОДАТЬ</button>
+        <form class="nft-modal-sale-form" hidden>
+          <label for="nft-modal-sale-price">Цена в звёздах</label>
+          <input id="nft-modal-sale-price" type="number" min="1" step="1" inputmode="numeric" placeholder="Введите цену" required>
+          <p class="nft-modal-sale-estimate">Примерная ценность ≈ <span>—</span><img src="stars.png" alt="" aria-hidden="true"></p>
+          <p class="nft-modal-sale-payout" hidden>Вы получите с продажи: <strong><span class="nft-modal-seller-payout">—</span><img class="nft-modal-payout-icon" src="stars.png" alt="" aria-hidden="true"></strong></p>
+          <p class="nft-modal-sale-status" role="status" hidden></p>
+          <button class="nft-modal-sale-submit" type="submit">Выставить на рынок</button>
+        </form>
         <button class="nft-modal-confirm" type="button">OK</button>
       </div>
     </section>

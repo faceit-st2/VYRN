@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Админ-панель | VYRN</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="admin.css?v=admin-gift-catalog-20261018">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js?v=admin-gift-catalog-20261018"></script>
+  <script src="nft-catalog.js?v=admin-gift-catalog-20261018"></script>
+  <script src="admin.js?v=admin-repeat-nft-20261018" defer></script>
+</head>
+<body class="admin-body">
+  <header class="admin-topbar">
+    <a class="admin-brand" href="index.html" aria-label="VYRN, на сайт">VYRN<span>ADMIN</span></a>
+    <div class="admin-topbar-meta">
+      <span class="admin-connection" id="admin-connection" data-state="loading"><span></span>Подключение</span>
+      <a class="admin-site-link" href="index.html">На сайт <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+  <main class="admin-layout">
+    <aside class="admin-users" aria-labelledby="users-title">
+      <div class="section-heading">
+        <p class="section-eyebrow">АККАУНТЫ</p>
+        <h1 id="users-title">Пользователи</h1>
+      </div>
+      <form class="user-search-form" id="user-search-form">
+        <label class="visually-hidden" for="user-search">Ник или Telegram ID</label>
+        <input id="user-search" type="search" placeholder="Ник или Telegram ID" autocomplete="off" required>
+        <button type="submit" aria-label="Найти пользователя">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+        </button>
+      </form>
+      <p class="admin-feedback" id="search-feedback" role="status" hidden></p>
+      <div class="user-results" id="user-results" aria-live="polite">
+        <p class="empty-note">Найдите пользователя по нику или ID</p>
+      </div>
+    </aside>
+
+    <section class="admin-content" aria-label="Управление аккаунтом">
+      <div class="no-user-state" id="no-user-state">
+        <div class="no-user-mark" aria-hidden="true">V</div>
+        <p>Выберите пользователя</p>
+      </div>
+      <div class="selected-user" id="selected-user" hidden>
+        <header class="selected-user-header">
+          <div class="selected-user-avatar" id="selected-user-avatar" aria-hidden="true">V</div>
+          <div class="selected-user-name-block">
+            <p class="section-eyebrow">АККАУНТ</p>
+            <h2 id="selected-user-name"></h2>
+            <p class="selected-user-handle" id="selected-user-handle"></p>
+          </div>
+          <div class="selected-user-id"><span>TELEGRAM ID</span><strong id="selected-user-id"></strong></div>
+        </header>
+
+        <section class="admin-section balance-section" aria-labelledby="balance-title">
+          <div class="admin-section-heading">
+            <div><p class="section-eyebrow">ВАЛЮТА АККАУНТА</p><h3 id="balance-title">Баланс</h3></div>
+            <p class="current-balance"><strong id="current-balance">0</strong><span>★</span></p>
+          </div>
+          <form class="balance-controls" id="balance-form">
+            <label class="visually-hidden" for="balance-amount">Количество звёзд</label>
+            <input id="balance-amount" type="number" min="1" step="1" inputmode="numeric" placeholder="Количество" required>
+            <button class="balance-add" type="submit" data-balance-action="add">Начислить</button>
+            <button class="balance-subtract" type="submit" data-balance-action="subtract">Списать</button>
+          </form>
+        </section>
+
+        <section class="admin-section inventory-section" aria-labelledby="inventory-title">
+          <div class="admin-section-heading">
+            <div><p class="section-eyebrow">ПРЕДМЕТЫ АККАУНТА</p><h3 id="inventory-title">Коллекция</h3></div>
+            <span class="inventory-count" id="inventory-count">0 NFT</span>
+          </div>
+          <div class="inventory-list" id="inventory-list"></div>
+          <p class="empty-note inventory-empty" id="inventory-empty">У пользователя пока нет подарков</p>
+        </section>
+
+        <section class="admin-section catalog-section" aria-labelledby="catalog-title">
+          <div class="admin-section-heading catalog-heading">
+            <div><p class="section-eyebrow">КАТАЛОГ VYRN</p><h3 id="catalog-title">Выдать подарок</h3></div>
+            <span class="catalog-count" id="catalog-count">30</span>
+          </div>
+          <label class="catalog-search-label">
+            <span class="visually-hidden">Поиск подарка</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+            <input id="catalog-search" type="search" placeholder="Название или номер">
+          </label>
+          <div class="gift-catalog" id="gift-catalog"></div>
+          <p class="empty-note catalog-empty" id="catalog-empty" hidden>Подарки не найдены</p>
+        </section>
+      </div>
+    </section>
+  </main>
+  <div class="admin-toast" id="admin-toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

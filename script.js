@@ -15,11 +15,11 @@ const navIndicator = document.querySelector('.nav-indicator');
 let activeItem = document.querySelector('.nav-button.is-active');
 const telegramWebApp = window.Telegram?.WebApp;
 const telegramUserStorageKey = 'vyrn.telegram.user.v1';
-const supabaseProjectUrl = 'https://umhrceixwdakatnozccz.supabase.co';
-const supabasePublishableKey = 'sb_publishable_PMGG6X6eBVsfTAcAwH6qzg_r65ZF4rc';
-const supabaseClient = window.supabase?.createClient(supabaseProjectUrl, supabasePublishableKey, {
+const supabaseConfig = window.VYRN_SUPABASE_CONFIG;
+const supabaseClient = window.supabase?.createClient(supabaseConfig?.url, supabaseConfig?.publishableKey, {
 	auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
 }) ?? null;
+window.VYRN_SUPABASE_CLIENT = supabaseClient;
 const getTelegramUser = () => {
 	let telegramUser = telegramWebApp?.initDataUnsafe?.user;
 	if (!telegramUser) {
@@ -46,8 +46,74 @@ const getTelegramUser = () => {
 };
 telegramWebApp?.ready();
 const telegramUser = getTelegramUser();
+const localUserStorageKey = 'vyrn.local.user.v1';
+const getOrCreateLocalUser = () => {
+	let localUser = null;
+	try {
+		localUser = JSON.parse(localStorage.getItem(localUserStorageKey) || 'null');
+	} catch {
+	}
+	if (Number.isSafeInteger(localUser?.id) && localUser.id > 0) return localUser;
+	const id = 8000000000000000 + Math.floor(Math.random() * 1000000000);
+	localUser = { id, first_name: 'Локальный аккаунт', username: `local_${id}` };
+	try {
+		localStorage.setItem(localUserStorageKey, JSON.stringify(localUser));
+	} catch {
+	}
+	return localUser;
+};
+const currentUser = telegramUser || getOrCreateLocalUser();
+const isLocalAccount = !telegramUser;
+const requestedProfileId = Number(new URLSearchParams(window.location.search).get('user'));
+const profileOwnerId = Number.isSafeInteger(requestedProfileId) && requestedProfileId > 0 ? requestedProfileId : currentUser.id;
+const isViewingOtherProfile = String(profileOwnerId) !== String(currentUser.id);
+window.VYRN_CURRENT_USER = currentUser;
+const balanceStorageKey = `vyrn.stars.balance.v1.${currentUser.id}`;
+const getCachedStarsBalance = () => {
+	try {
+		const cachedBalance = localStorage.getItem(balanceStorageKey);
+		if (cachedBalance === null) return null;
+		const balance = Number(cachedBalance);
+		return Number.isSafeInteger(balance) && balance >= 0 ? balance : null;
+	} catch {
+		return null;
+	}
+};
+const renderAccountBalance = (balance) => {
+	const formattedBalance = balance.toLocaleString('ru-RU');
+	document.querySelectorAll('.star-balance').forEach((element) => {
+		const value = element.querySelector('span');
+		if (value) value.textContent = formattedBalance;
+		element.setAttribute('aria-label', `Баланс: ${formattedBalance} звёзд`);
+	});
+	const walletBalance = document.querySelector('[data-wallet-balance]');
+	if (walletBalance) walletBalance.textContent = formattedBalance;
+};
+let cachedStarsBalance = getCachedStarsBalance();
+if (cachedStarsBalance === null) {
+	document.querySelectorAll('.star-balance').forEach((element) => {
+		const value = element.querySelector('span');
+		if (value) value.textContent = '…';
+		element.setAttribute('aria-label', 'Баланс загружается');
+	});
+	const walletBalance = document.querySelector('[data-wallet-balance]');
+	if (walletBalance) walletBalance.textContent = '…';
+} else {
+	renderAccountBalance(cachedStarsBalance);
+}
+document.addEventListener('vyrn:supabase-profile-loaded', (event) => {
+	if (String(event.detail?.telegram_id) !== String(currentUser.id)) return;
+	const balance = Number(event.detail?.stars_balance);
+	if (!Number.isSafeInteger(balance) || balance < 0) return;
+	cachedStarsBalance = balance;
+	try {
+		localStorage.setItem(balanceStorageKey, String(balance));
+	} catch {
+	}
+	renderAccountBalance(balance);
+});
 let storedProfile = null;
-if (!telegramUser) {
+if (isLocalAccount) {
 	try {
 		storedProfile = JSON.parse(localStorage.getItem('vyrn.profile.editor.v1') || 'null');
 	} catch {
@@ -63,21 +129,52 @@ const profileDataFromSupabase = (profile) => ({
 	phone: profile.phone || '',
 	avatar: profile.photo_url || ''
 });
+const publicProfilePage = document.querySelector('.profile-page:not(.player-profile-page)');
+if (publicProfilePage && isViewingOtherProfile) {
+	const editButton = publicProfilePage.querySelector('.profile-edit-button');
+	const nameElement = publicProfilePage.querySelector('.profile-name');
+	const detailValues = [...publicProfilePage.querySelectorAll('.profile-detail-value')];
+	const avatarImage = publicProfilePage.querySelector('.profile-avatar-image');
+	if (editButton) editButton.hidden = true;
+	const renderPublicProfile = (profile) => {
+		if (String(profile?.telegram_id) !== String(profileOwnerId)) return;
+		const profileData = profileDataFromSupabase(profile);
+		nameElement.textContent = [profileData.firstName, profileData.lastName].filter(Boolean).join(' ');
+		if (detailValues[0]) detailValues[0].textContent = profileData.username;
+		if (detailValues[1]) detailValues[1].textContent = profileData.about;
+		if (profileData.avatar) {
+			avatarImage.src = profileData.avatar;
+			avatarImage.hidden = false;
+		} else {
+			avatarImage.removeAttribute('src');
+			avatarImage.hidden = true;
+		}
+	};
+	document.addEventListener('vyrn:supabase-profile-loaded', (event) => renderPublicProfile(event.detail));
+	if (supabaseClient) {
+		supabaseClient.from('telegram_profiles').select('*').eq('telegram_id', profileOwnerId).single()
+			.then(({ data, error }) => {
+				if (error) throw error;
+				document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: data }));
+			})
+			.catch((error) => document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-load-failed', { detail: error })));
+	}
+}
 const syncSupabaseProfile = async (profileData) => {
-	if (!supabaseClient || !telegramUser) {
-		throw new Error('Supabase client or Telegram user is unavailable.');
+	if (!supabaseClient || !currentUser) {
+		throw new Error('Supabase client or account is unavailable.');
 	}
 	const telegramProfile = {
-		telegram_id: telegramUser.id,
-		telegram_username: telegramUser.username || null,
-		telegram_first_name: telegramUser.first_name,
-		telegram_last_name: telegramUser.last_name || '',
-		language_code: telegramUser.language_code || null,
-		is_premium: telegramUser.is_premium === true,
-		photo_url: telegramUser.photo_url || null,
-		nickname: telegramUser.username || telegramUser.first_name,
-		profile_first_name: telegramUser.first_name,
-		profile_last_name: telegramUser.last_name || ''
+		telegram_id: currentUser.id,
+		telegram_username: currentUser.username || null,
+		telegram_first_name: currentUser.first_name,
+		telegram_last_name: currentUser.last_name || '',
+		language_code: currentUser.language_code || null,
+		is_premium: currentUser.is_premium === true,
+		photo_url: currentUser.photo_url || null,
+		nickname: currentUser.username || currentUser.first_name,
+		profile_first_name: currentUser.first_name,
+		profile_last_name: currentUser.last_name || ''
 	};
 	const { error: insertError } = await supabaseClient
 		.from('telegram_profiles')
@@ -85,7 +182,7 @@ const syncSupabaseProfile = async (profileData) => {
 	if (insertError) throw insertError;
 
 	if (profileData) {
-		const nickname = profileData.username.replace(/^@+/, '') || telegramUser.username || telegramUser.first_name;
+		const nickname = profileData.username.replace(/^@+/, '') || currentUser.username || currentUser.first_name;
 		const { error: updateError } = await supabaseClient
 			.from('telegram_profiles')
 			.update({
@@ -96,38 +193,54 @@ const syncSupabaseProfile = async (profileData) => {
 				birthday: profileData.birthday || null,
 				phone: profileData.phone
 			})
-			.eq('telegram_id', telegramUser.id);
+			.eq('telegram_id', currentUser.id);
 		if (updateError) throw updateError;
 	}
 	const { data: profile, error: selectError } = await supabaseClient
 		.from('telegram_profiles')
 		.select('*')
-		.eq('telegram_id', telegramUser.id)
+		.eq('telegram_id', currentUser.id)
 		.single();
 	if (selectError) throw selectError;
 	supabaseAccountProfile = profile;
 	const balance = Number(profile.stars_balance);
 	if (Number.isSafeInteger(balance) && balance >= 0) {
-		document.querySelectorAll('.star-balance').forEach((element) => {
-			const value = element.querySelector('span');
-			if (value) value.textContent = balance.toLocaleString('ru-RU');
-			element.setAttribute('aria-label', `Баланс: ${balance.toLocaleString('ru-RU')} звёзд`);
-		});
-		const walletBalance = document.querySelector('[data-wallet-balance]');
-		if (walletBalance) walletBalance.textContent = balance.toLocaleString('ru-RU');
+		cachedStarsBalance = balance;
+		try {
+			localStorage.setItem(balanceStorageKey, String(balance));
+		} catch {
+		}
+		renderAccountBalance(balance);
 	}
 	document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: profile }));
 	return profile;
 };
-if (supabaseClient && telegramUser) {
-	syncSupabaseProfile().catch((error) => console.error('Supabase profile sync failed:', error));
+const refreshSupabaseAccountProfile = async () => {
+	if (!supabaseClient || !currentUser) {
+		throw new Error('Профиль аккаунта недоступен.');
+	}
+	const { data: profile, error } = await supabaseClient
+		.from('telegram_profiles')
+		.select('*')
+		.eq('telegram_id', currentUser.id)
+		.single();
+	if (error) throw error;
+	supabaseAccountProfile = profile;
+	document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: profile }));
+	return profile;
+};
+if (supabaseClient && currentUser) {
+	syncSupabaseProfile(isLocalAccount ? storedProfile : undefined).catch((error) => {
+		console.error('Supabase profile sync failed:', error);
+		document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-load-failed', { detail: error }));
+	});
 }
 const avatarName = [storedProfile?.firstName, storedProfile?.lastName]
 	.filter((name) => typeof name === 'string' && name.trim())
 	.join(' ')
-	|| [telegramUser?.first_name, telegramUser?.last_name].filter(Boolean).join(' ');
+	|| [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(' ');
 const avatarInitials = avatarName.split(/\s+/).filter(Boolean).map((name) => [...name][0]).join('').slice(0, 2).toLocaleUpperCase('ru-RU') || 'V';
-const avatarSource = telegramUser?.photo_url || storedProfile?.avatar || '';
+const avatarSource = currentUser?.photo_url || storedProfile?.avatar || '';
 document.querySelectorAll('.nav-avatar').forEach((avatar) => {
 	avatar.querySelector('.nav-avatar-fallback').textContent = avatarInitials;
 	const image = avatar.querySelector('.nav-avatar-image');
@@ -154,17 +267,17 @@ if (walletCard && walletAddressElement) {
 		}
 	}
 	walletAccountNameElement.textContent = profileName
-		|| [telegramUser?.first_name, telegramUser?.last_name].filter(Boolean).join(' ')
+		|| [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(' ')
 		|| 'VYRN';
 	document.addEventListener('vyrn:supabase-profile-loaded', (event) => {
-		if (String(event.detail?.telegram_id) === String(telegramUser?.id)) {
+		if (String(event.detail?.telegram_id) === String(currentUser?.id)) {
 			walletAccountNameElement.textContent = [event.detail.profile_first_name, event.detail.profile_last_name]
 				.filter((name) => typeof name === 'string' && name.trim())
 				.join(' ') || 'VYRN';
 		}
 	});
 	const addressAlphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-	const storageKey = `vyrn.wallet.address.v2.${telegramUser?.id ?? 'local'}`;
+	const storageKey = `vyrn.wallet.address.v2.${currentUser?.id ?? 'local'}`;
 	const formatAddressLine = (value) => `${value.slice(0, 3)}- ${value.slice(3, 5)}-${value.slice(5, 6)} ${value.slice(6, 10)} ${value.slice(10, 14)} ${value.slice(14, 17)}- ${value.slice(17, 21)}`;
 	let addressCode = '';
 	try {
@@ -191,7 +304,7 @@ if (walletCard && walletAddressElement) {
 	} catch {
 		savedWalletProfile = null;
 	}
-	const walletAvatar = savedWalletProfile?.avatar || telegramUser?.photo_url || '';
+	const walletAvatar = savedWalletProfile?.avatar || currentUser?.photo_url || '';
 	document.querySelectorAll('.wallet-transaction-avatar-image').forEach((image) => {
 		const avatarContainer = image.closest('.wallet-transaction-avatar');
 		if (!walletAvatar) {
@@ -335,16 +448,20 @@ if (walletMenuButton && walletMoreMenu && walletCurrencyToggle && walletCurrency
 	const walletBalance = document.querySelector('[data-wallet-balance]');
 	const walletEquivalent = document.querySelector('.wallet-balance-usd');
 	const walletCurrencyName = document.querySelector('.wallet-menu-current');
-	const savedStarsBalance = Number(supabaseAccountProfile?.stars_balance);
-	let starsBalance = Number.isSafeInteger(savedStarsBalance) && savedStarsBalance >= 0 ? savedStarsBalance : 100;
+	let starsBalance = cachedStarsBalance;
 	const usdPerStar = 0.02;
 	const rubPerUsd = 90;
 	const renderWalletCurrency = (currency) => {
-		const equivalentUsd = starsBalance * usdPerStar;
-		walletBalance.textContent = starsBalance.toLocaleString('ru-RU');
-		walletEquivalent.textContent = currency === 'rub'
-			? new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(equivalentUsd * rubPerUsd)
-			: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(equivalentUsd);
+		if (starsBalance === null) {
+			walletBalance.textContent = '…';
+			walletEquivalent.textContent = '—';
+		} else {
+			const equivalentUsd = starsBalance * usdPerStar;
+			walletBalance.textContent = starsBalance.toLocaleString('ru-RU');
+			walletEquivalent.textContent = currency === 'rub'
+				? new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(equivalentUsd * rubPerUsd)
+				: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(equivalentUsd);
+		}
 		walletCurrencyName.textContent = currency.toUpperCase();
 		document.querySelectorAll('[data-wallet-currency]').forEach((button) => {
 			const selected = button.dataset.walletCurrency === currency;
@@ -401,7 +518,7 @@ const profileEditorBirthdayValue = profileEditorForm?.querySelector('.profile-ed
 const profileAvatarImage = profileAvatarElement?.querySelector('.profile-avatar-image');
 const profileDetailValues = profileContentElement ? [...profileContentElement.querySelectorAll('.profile-detail-value')] : [];
 
-if (profileEditButton && profileEditorDialog && profileEditorForm && profileAvatarElement && profileNameElement && profileDetailValues.length >= 2) {
+if (profileEditButton && profileEditorDialog && profileEditorForm && profileAvatarElement && profileNameElement && profileDetailValues.length >= 2 && !isViewingOtherProfile) {
 	const telegramUser = getTelegramUser();
 	const storedName = profileNameElement.textContent.trim().split(/\s+/);
 	const defaultProfile = {
@@ -489,7 +606,7 @@ if (profileEditButton && profileEditorDialog && profileEditorForm && profileAvat
 		setAvatarImage(profileAvatarImage, profileData.avatar);
 	};
 	const applySupabaseProfile = (profile) => {
-		if (!telegramUser || String(profile?.telegram_id) !== String(telegramUser.id)) {
+		if (!currentUser || String(profile?.telegram_id) !== String(currentUser.id)) {
 			return;
 		}
 		profileData = { ...profileData, ...profileDataFromSupabase(profile) };
@@ -544,10 +661,11 @@ if (profileEditButton && profileEditorDialog && profileEditorForm && profileAvat
 			phone: profileEditorForm.elements.namedItem('phone').value.trim(),
 			avatar: profileData.avatar
 		};
-		if (telegramUser) {
+		if (supabaseClient && currentUser) {
 			try {
 				const savedProfile = await syncSupabaseProfile(nextProfile);
 				profileData = { ...profileData, ...profileDataFromSupabase(savedProfile) };
+				if (isLocalAccount) localStorage.setItem('vyrn.profile.editor.v1', JSON.stringify(nextProfile));
 			} catch {
 				profileEditorError.textContent = 'Не удалось сохранить изменения в Supabase.';
 				profileEditorError.hidden = false;
@@ -570,38 +688,7 @@ if (profileEditButton && profileEditorDialog && profileEditorForm && profileAvat
 }
 }
 
-const nftCollection = [
-	{ slug: 'algorithmcup', id: 64, name: 'Algorithm Cups', lastSaleTon: 5000 },
-	{ slug: 'artisanbrick', id: 5821, name: 'Artisan Bricks', lastSaleTon: 588 },
-	{ slug: 'astralshard', id: 5129, name: 'Astral Shards', lastSaleTon: 3222 },
-	{ slug: 'bdaycandle', id: 220304, name: 'B-Day Candles', lastSaleTon: 99 },
-	{ slug: 'berrybox', id: 444, name: 'Berry Boxes', lastSaleTon: 111 },
-	{ slug: 'bigyear', id: 11599, name: 'Big Years', lastSaleTon: 1000 },
-	{ slug: 'blingbinky', id: 1234, name: 'Bling Binkies', lastSaleTon: 250 },
-	{ slug: 'bondedring', id: 1001, name: 'Bonded Rings', lastSaleTon: 3000 },
-	{ slug: 'bowtie', id: 31485, name: 'Bow Ties', lastSaleTon: 333 },
-	{ slug: 'bunnymuffin', id: 38, name: 'Bunny Muffins', lastSaleTon: 500 },
-	{ slug: 'candycane', id: 49040, name: 'Candy Canes', lastSaleTon: 200 },
-	{ slug: 'chillflame', id: 113221, name: 'Chill Flames', lastSaleTon: 133 },
-	{ slug: 'cloverpin', id: 888, name: 'Clover Pins', lastSaleTon: 3333 },
-	{ slug: 'cookieheart', id: 28888, name: 'Cookie Hearts', lastSaleTon: 300 },
-	{ slug: 'crystalball', id: 7446, name: 'Crystal Balls', lastSaleTon: 230 },
-	{ slug: 'cupidcharm', id: 3396, name: 'Cupid Charms', lastSaleTon: 730 },
-	{ slug: 'deskcalendar', id: 111216, name: 'Desk Calendars', lastSaleTon: 1049 },
-	{ slug: 'diamondring', id: 27070, name: 'Diamond Rings', lastSaleTon: 1050 },
-	{ slug: 'durovscap', id: 1142, name: 'Durov’s Caps', lastSaleTon: 6555 },
-	{ slug: 'durovsglasses', id: 1305, name: 'Durov’s Glasses', lastSaleTon: 555 },
-	{ slug: 'easteregg', id: 103928, name: 'Easter Eggs', lastSaleTon: 525 },
-	{ slug: 'electricskull', id: 8193, name: 'Electric Skulls', lastSaleTon: 479 },
-	{ slug: 'eternalcandle', id: 6666, name: 'Eternal Candles', lastSaleTon: 388 },
-	{ slug: 'eternalrose', id: 28435, name: 'Eternal Roses', lastSaleTon: 380 },
-	{ slug: 'evileye', id: 7777, name: 'Evil Eyes', lastSaleTon: 777 },
-	{ slug: 'faithamulet', id: 9494, name: 'Faith Amulets', lastSaleTon: 1111 },
-	{ slug: 'finepen', id: 33333, name: 'Fine Pens', lastSaleTon: 233 },
-	{ slug: 'flyingbroom', id: 22528, name: 'Flying Brooms', lastSaleTon: 150 },
-	{ slug: 'freshsocks', id: 141858, name: 'Fresh Socks', lastSaleTon: 500 },
-	{ slug: 'gemsignet', id: 76, name: 'Gem Signets', lastSaleTon: 800 }
-];
+const nftCollection = window.VYRN_NFT_CATALOG || [];
 const normalizeUserNfts = (nfts) => Array.isArray(nfts)
 	? nfts.filter((gift) => gift
 		&& typeof gift.slug === 'string'
@@ -612,6 +699,9 @@ const normalizeUserNfts = (nfts) => Array.isArray(nfts)
 		.map((gift) => ({ ...gift, id: Number(gift.id) }))
 	: [];
 let userNftCollection = normalizeUserNfts(supabaseAccountProfile?.nfts);
+let userSaleListings = [];
+let profileNftView = 'nft';
+const getSellerPayout = (price) => price - Math.ceil(price * 0.05);
 
 const getNftPreviewUrl = (slug, id) => `https://nft.fragment.com/gift/${slug}-${id}.webp?fresh=${Date.now()}`;
 const getNftAnimationUrl = (fileName) => `https://nft.fragment.com/gift/${fileName}`;
@@ -626,6 +716,7 @@ const createNftPreviewImage = (source, title, className) => {
 const collectionPreviewGrid = document.querySelector('.collection-preview-grid');
 if (collectionPreviewGrid) {
 	const collectionTotal = collectionPreviewGrid.closest('.collection-panel').querySelector('.collection-total');
+	if (supabaseClient && currentUser) collectionPreviewGrid.classList.add('is-loading');
 	const renderCollectionPreview = () => {
 		collectionTotal.textContent = `${userNftCollection.length.toLocaleString('ru-RU')} NFT`;
 		collectionTotal.setAttribute('aria-label', `Количество NFT: ${userNftCollection.length}`);
@@ -642,119 +733,15 @@ if (collectionPreviewGrid) {
 	};
 	renderCollectionPreview();
 	document.addEventListener('vyrn:supabase-profile-loaded', (event) => {
-		if (String(event.detail?.telegram_id) !== String(telegramUser?.id)) return;
+		if (String(event.detail?.telegram_id) !== String(profileOwnerId)) return;
+		collectionPreviewGrid.classList.remove('is-loading', 'has-load-error');
 		userNftCollection = normalizeUserNfts(event.detail.nfts);
 		renderCollectionPreview();
 	});
-}
-
-const marketGrid = document.querySelector('.market-grid');
-if (marketGrid) {
-	const marketSearch = document.querySelector('.market-search-input');
-	const marketCollectionFilter = document.querySelector('.market-collection-filter');
-	const marketSort = document.querySelector('.market-sort');
-	const marketEmpty = document.querySelector('.market-empty');
-	const marketTradeButtons = [...document.querySelectorAll('.market-trade-button')];
-	const marketTradeNav = document.querySelector('.market-trade-nav');
-	const marketTradeIndicator = marketTradeNav.querySelector('.market-trade-indicator');
-	const marketCards = [];
-	let marketMode = 'all';
-	const moveMarketIndicator = (button) => {
-		const buttonBounds = button.getBoundingClientRect();
-		const navBounds = marketTradeNav.getBoundingClientRect();
-		marketTradeIndicator.style.left = `${buttonBounds.left - navBounds.left - marketTradeNav.clientLeft}px`;
-		marketTradeIndicator.style.setProperty('--market-indicator-width', `${buttonBounds.width}px`);
-	};
-	moveMarketIndicator(marketTradeButtons.find((button) => button.classList.contains('is-active')));
-	window.addEventListener('resize', () => moveMarketIndicator(marketTradeButtons.find((button) => button.classList.contains('is-active'))));
-
-	nftCollection.forEach((gift) => {
-		const title = `${gift.name} #${gift.id}`;
-		const card = document.createElement('article');
-		card.className = 'market-card';
-		card.dataset.marketName = title.toLocaleLowerCase('ru-RU');
-		card.dataset.marketCollection = gift.name;
-		card.dataset.marketPrice = String(Math.round(gift.lastSaleTon * 100));
-
-		const imageFrame = document.createElement('div');
-		imageFrame.className = 'market-card-image-frame';
-		const image = createNftPreviewImage(getNftPreviewUrl(gift.slug, gift.id), title, 'market-card-image');
-		image.loading = 'lazy';
-		imageFrame.append(image);
-
-		const content = document.createElement('div');
-		content.className = 'market-card-content';
-		const heading = document.createElement('div');
-		heading.className = 'market-card-heading';
-		const name = document.createElement('h2');
-		name.className = 'market-card-name';
-		name.textContent = title;
-		heading.append(name);
-
-		const price = document.createElement('div');
-		price.className = 'market-card-price';
-		const priceStars = Math.round(gift.lastSaleTon * 100);
-		const label = document.createElement('span');
-		label.className = 'market-card-price-label';
-		label.textContent = 'Последняя продажа';
-		const value = document.createElement('span');
-		value.className = 'market-card-price-value';
-		value.textContent = priceStars.toLocaleString('ru-RU');
-		const icon = document.createElement('img');
-		icon.src = 'stars.png';
-		icon.alt = '';
-		icon.setAttribute('aria-hidden', 'true');
-		price.append(label, value, icon);
-		content.append(heading, price);
-		card.append(imageFrame, content);
-		marketCards.push(card);
-		marketCollectionFilter.add(new Option(gift.name, gift.name));
+	document.addEventListener('vyrn:supabase-profile-load-failed', () => {
+		collectionPreviewGrid.classList.remove('is-loading');
+		collectionPreviewGrid.classList.add('has-load-error');
 	});
-
-	const renderMarketList = () => {
-		const query = marketSearch.value.trim().toLocaleLowerCase('ru-RU');
-		const collection = marketCollectionFilter.value;
-		const visibleCards = marketMode === 'all' ? marketCards.filter((card) => {
-			const matchesQuery = !query || card.dataset.marketName.includes(query);
-			const matchesCollection = !collection || card.dataset.marketCollection === collection;
-			return matchesQuery && matchesCollection;
-		}) : [];
-		if (marketSort.value === 'price-asc' || marketSort.value === 'price-desc') {
-			const direction = marketSort.value === 'price-asc' ? 1 : -1;
-			visibleCards.sort((first, second) => {
-				const firstPrice = Number(first.dataset.marketPrice) || Number.POSITIVE_INFINITY;
-				const secondPrice = Number(second.dataset.marketPrice) || Number.POSITIVE_INFINITY;
-				return (firstPrice - secondPrice) * direction;
-			});
-		} else {
-			visibleCards.sort((first, second) => first.dataset.marketName.localeCompare(second.dataset.marketName, 'ru'));
-		}
-
-		marketGrid.replaceChildren(...visibleCards);
-		marketEmpty.textContent = marketMode === 'sales'
-			? 'У вас пока нет объявлений о продаже'
-			: marketMode === 'purchases'
-				? 'Покупок пока нет'
-				: 'Ничего не найдено';
-		marketEmpty.hidden = visibleCards.length > 0;
-	};
-
-	marketSearch.addEventListener('input', renderMarketList);
-	marketCollectionFilter.addEventListener('change', renderMarketList);
-	marketSort.addEventListener('change', renderMarketList);
-	marketTradeButtons.forEach((button) => {
-		button.addEventListener('click', () => {
-			marketMode = button.dataset.marketMode;
-			marketTradeButtons.forEach((item) => {
-				const active = item === button;
-				item.classList.toggle('is-active', active);
-				item.setAttribute('aria-pressed', String(active));
-			});
-			moveMarketIndicator(button);
-			renderMarketList();
-		});
-	});
-	renderMarketList();
 }
 
 	const loadTgsData = async (source) => {
@@ -792,8 +779,9 @@ const createTgsPreview = async (container, source) => {
 
 const nftGrid = document.querySelector('.profile-page:not(.player-profile-page) .profile-nft-grid');
 if (nftGrid) {
+	if (supabaseClient && currentUser) nftGrid.classList.add('is-loading');
 	const startedNftCards = new WeakSet();
-	const renderNftCard = (gift) => {
+	const renderNftCard = (gift, index, isListing = false) => {
 		const title = `${gift.name} #${gift.id}`;
 		const file = `${gift.slug}-${gift.id}.tgs`;
 		const source = getNftAnimationUrl(file);
@@ -806,6 +794,11 @@ if (nftGrid) {
 		card.dataset.nftTitle = title;
 		card.dataset.nftModel = gift.name;
 		card.dataset.nftFile = file;
+		card.dataset.nftSlug = gift.slug;
+		card.dataset.nftId = String(gift.id);
+		card.dataset.nftIndex = String(index);
+		card.dataset.nftOwnerId = String(profileOwnerId || '');
+		card.dataset.nftIsListing = String(isListing);
 		card.setAttribute('aria-label', `Открыть ${title}`);
 
 		const animationHost = document.createElement('div');
@@ -845,15 +838,48 @@ if (nftGrid) {
 		});
 	};
 	const renderNftCollection = () => {
+		nftGrid.dataset.view = profileNftView;
 		nftGrid.replaceChildren();
-		cards = userNftCollection.map(renderNftCard);
+		const gifts = profileNftView === 'sales'
+			? userSaleListings.map((listing) => listing.nft_data)
+			: userNftCollection;
+		cards = gifts.map((gift, index) => renderNftCard(gift, index, profileNftView === 'sales'));
 		updateVisibleNftCards();
 	};
+	let saleListingsLoaded = false;
+	const loadUserSaleListings = async (refresh = false) => {
+		if (!supabaseClient || !currentUser || (saleListingsLoaded && !refresh)) return;
+		nftGrid.classList.add('is-loading');
+		const { data, error } = await supabaseClient
+			.from('nft_listings')
+			.select('*')
+			.eq('seller_telegram_id', profileOwnerId)
+			.eq('status', 'active')
+			.order('created_at', { ascending: false });
+		if (error) {
+			nftGrid.classList.remove('is-loading');
+			nftGrid.classList.add('has-load-error');
+			return;
+		}
+		userSaleListings = (data || []).filter((listing) => listing?.nft_data?.slug && listing?.nft_data?.id);
+		saleListingsLoaded = true;
+		nftGrid.classList.remove('is-loading', 'has-load-error');
+		if (profileNftView === 'sales') renderNftCollection();
+	};
+	document.addEventListener('vyrn:profile-view-changed', (event) => {
+		if (event.detail === 'sales') loadUserSaleListings();
+		renderNftCollection();
+	});
 	renderNftCollection();
 	document.addEventListener('vyrn:supabase-profile-loaded', (event) => {
-		if (String(event.detail?.telegram_id) !== String(telegramUser?.id)) return;
+		if (String(event.detail?.telegram_id) !== String(profileOwnerId)) return;
+		nftGrid.classList.remove('is-loading', 'has-load-error');
 		userNftCollection = normalizeUserNfts(event.detail.nfts);
 		renderNftCollection();
+	});
+	document.addEventListener('vyrn:supabase-profile-load-failed', () => {
+		nftGrid.classList.remove('is-loading');
+		nftGrid.classList.add('has-load-error');
 	});
 
 	window.addEventListener('scroll', updateVisibleNftCards, { passive: true });
@@ -879,6 +905,8 @@ if (profileNftTabs) {
 				tab.setAttribute('aria-pressed', String(isActive));
 			});
 			moveProfileNftIndicator(button);
+			profileNftView = button.dataset.profileView || 'nft';
+			document.dispatchEvent(new CustomEvent('vyrn:profile-view-changed', { detail: profileNftView }));
 		});
 	});
 }
@@ -893,13 +921,43 @@ if (nftGrids.length && nftModal && nftModalAnimation && nftModalBackdrop) {
 	const nftModalOwner = nftModal.querySelector('.nft-modal-owner');
 	const nftModalModel = nftModal.querySelector('.nft-modal-model');
 	const nftModalPrice = nftModal.querySelector('.nft-modal-price');
+	const nftModalSellButton = nftModal.querySelector('.nft-modal-sell');
+	const nftModalSaleForm = nftModal.querySelector('.nft-modal-sale-form');
+	const nftModalSalePrice = nftModalSaleForm.querySelector('#nft-modal-sale-price');
+	const nftModalSaleEstimate = nftModalSaleForm.querySelector('.nft-modal-sale-estimate span');
+	const nftModalSellerPayout = nftModal.querySelector('.nft-modal-seller-payout');
+	const nftModalSellerPayoutLine = nftModal.querySelector('.nft-modal-sale-payout');
+	const nftModalListingPayoutRow = nftModal.querySelector('.nft-modal-listing-payout-row');
+	const nftModalListingPayout = nftModal.querySelector('.nft-modal-listing-payout');
+	const nftModalSaleStatus = nftModalSaleForm.querySelector('.nft-modal-sale-status');
+	const nftModalSaleSubmit = nftModalSaleForm.querySelector('.nft-modal-sale-submit');
+	const nftModalConfirm = nftModal.querySelector('.nft-modal-confirm');
+	const nftModalActionStatus = nftModal.querySelector('.nft-modal-action-status');
 	let activeNftAnimation;
 	let activeNftBackdrop;
+	let activeNftCard;
+	let activeSaleListing = null;
+	let isWithdrawingListing = false;
 	let animationRequestId = 0;
 
 	const clearNftAnimation = () => {
 		animationRequestId++;
+		activeNftCard = null;
+		activeSaleListing = null;
+		nftModal.classList.remove('is-sale-mode', 'is-closing');
 		nftModalPrice.textContent = '—';
+		nftModalSellButton.hidden = true;
+		nftModalSaleForm.hidden = true;
+		nftModalSaleForm.reset();
+		nftModalSellerPayoutLine.hidden = true;
+		nftModalListingPayoutRow.hidden = true;
+		nftModalSaleStatus.hidden = true;
+		nftModalActionStatus.hidden = true;
+		nftModalSaleSubmit.disabled = false;
+		nftModalSaleSubmit.textContent = 'Выставить на рынок';
+		nftModalConfirm.disabled = false;
+		nftModalConfirm.hidden = true;
+		nftModalConfirm.textContent = 'OK';
 		activeNftAnimation?.destroy();
 		activeNftAnimation = null;
 		activeNftBackdrop?.destroy();
@@ -942,16 +1000,18 @@ if (nftGrids.length && nftModal && nftModalAnimation && nftModalBackdrop) {
 		return overlayData;
 	};
 
-	const loadNftPrice = (fileName) => {
+	const loadNftPrice = (fileName, askingPrice = null) => {
 		const giftId = fileName.replace(/\.tgs$/, '');
 		const gift = nftCollection.find((item) => `${item.slug}-${item.id}` === giftId);
-		if (!gift) {
+		if (!gift && !Number.isSafeInteger(askingPrice)) {
 			nftModalPrice.textContent = 'Нет данных';
 			return;
 		}
 
 		const priceValue = document.createElement('span');
-		priceValue.textContent = Math.round(gift.lastSaleTon * 100).toLocaleString('ru-RU');
+		priceValue.textContent = Number.isSafeInteger(askingPrice)
+			? askingPrice.toLocaleString('ru-RU')
+			: Math.round(gift.lastSaleTon * 100).toLocaleString('ru-RU');
 		const currencyIcon = document.createElement('img');
 		currencyIcon.className = 'nft-modal-price-icon';
 		currencyIcon.src = 'stars.png';
@@ -959,6 +1019,78 @@ if (nftGrids.length && nftModal && nftModalAnimation && nftModalBackdrop) {
 		currencyIcon.setAttribute('aria-hidden', 'true');
 		nftModalPrice.replaceChildren(priceValue, currencyIcon);
 	};
+
+	const setSaleEstimate = (gift) => {
+		const catalogGift = nftCollection.find((item) => item.slug === gift?.slug && Number(item.id) === Number(gift?.id));
+		nftModalSaleEstimate.textContent = catalogGift
+			? Math.round(catalogGift.lastSaleTon * 100).toLocaleString('ru-RU')
+			: '—';
+	};
+	const updateSellerPayout = () => {
+		const price = Number(nftModalSalePrice.value);
+		const hasValidPrice = Number.isSafeInteger(price) && price >= 1;
+		nftModalSellerPayoutLine.hidden = !hasValidPrice;
+		if (hasValidPrice) nftModalSellerPayout.textContent = getSellerPayout(price).toLocaleString('ru-RU');
+	};
+	nftModalSalePrice.addEventListener('input', updateSellerPayout);
+
+	nftModalSellButton.addEventListener('click', () => {
+		nftModalSaleForm.hidden = false;
+		nftModal.classList.add('is-sale-mode');
+		nftModalSaleStatus.hidden = true;
+		requestAnimationFrame(() => nftModalSalePrice.focus());
+	});
+
+	nftModalSaleForm.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		const price = Number(nftModalSalePrice.value);
+		if (!activeNftCard || !currentUser || !supabaseClient) {
+			nftModalSaleStatus.textContent = 'Не удалось определить владельца NFT.';
+			nftModalSaleStatus.hidden = false;
+			return;
+		}
+		if (!Number.isSafeInteger(price) || price < 1) {
+			nftModalSaleStatus.textContent = 'Введите целую цену не меньше 1 звезды.';
+			nftModalSaleStatus.hidden = false;
+			return;
+		}
+
+		const nftIndex = Number(activeNftCard.dataset.nftIndex);
+		const gift = userNftCollection[nftIndex];
+		if (!gift || gift.slug !== activeNftCard.dataset.nftSlug || Number(gift.id) !== Number(activeNftCard.dataset.nftId)) {
+			nftModalSaleStatus.textContent = 'Этот NFT уже недоступен в коллекции.';
+			nftModalSaleStatus.hidden = false;
+			return;
+		}
+
+		nftModalSaleSubmit.disabled = true;
+		nftModalSaleSubmit.textContent = 'Выставляем…';
+		nftModalSaleStatus.hidden = true;
+		try {
+			const { data: listing, error } = await supabaseClient.rpc('create_nft_listing', {
+				p_seller_telegram_id: currentUser.id,
+				p_nft_data: gift,
+				p_price: price
+			});
+			if (error) throw error;
+			if (!listing?.id) throw new Error('Supabase не подтвердил создание объявления.');
+			const updatedNfts = [...userNftCollection];
+			updatedNfts.splice(nftIndex, 1);
+			supabaseAccountProfile = { ...supabaseAccountProfile, nfts: updatedNfts };
+			document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: supabaseAccountProfile }));
+			userSaleListings.unshift(listing);
+			saleListingsLoaded = true;
+			profileNftTabs?.querySelector('[data-profile-view="sales"]')?.click();
+			closeNftModal();
+			refreshSupabaseAccountProfile().catch((refreshError) => console.error('Could not refresh profile after listing:', refreshError));
+		} catch (error) {
+			nftModalSaleStatus.textContent = error.message || 'Не удалось выставить NFT на рынок.';
+			nftModalSaleStatus.hidden = false;
+		} finally {
+			nftModalSaleSubmit.disabled = false;
+			nftModalSaleSubmit.textContent = 'Выставить на рынок';
+		}
+	});
 
 	const createNftBackdropData = (animationData) => {
 		const backdropData = structuredClone(animationData);
@@ -1053,16 +1185,71 @@ if (nftGrids.length && nftModal && nftModalAnimation && nftModalBackdrop) {
 			nftModalOwner.textContent = nftCard.closest('.profile-page')?.querySelector('.profile-name')?.textContent.trim() || '';
 			nftModalModel.textContent = nftCard.dataset.nftModel;
 			clearNftAnimation();
+			activeNftCard = nftCard;
+			const isOwnNft = String(nftCard.dataset.nftOwnerId) === String(currentUser?.id);
+			const isListing = nftCard.dataset.nftIsListing === 'true';
+			const listing = isListing ? userSaleListings[Number(nftCard.dataset.nftIndex)] : null;
+			activeSaleListing = listing;
+			nftModalSellButton.hidden = !isOwnNft || isListing;
+			nftModalConfirm.hidden = !listing;
+			nftModalConfirm.textContent = isListing ? 'СНЯТЬ С ПРОДАЖИ' : 'OK';
+			nftModalListingPayoutRow.hidden = !listing;
+			if (listing) nftModalListingPayout.textContent = getSellerPayout(Number(listing.price)).toLocaleString('ru-RU');
+			const gift = listing?.nft_data || userNftCollection[Number(nftCard.dataset.nftIndex)];
+			setSaleEstimate(gift);
 			nftModal.showModal();
 			nftModal.querySelector('.nft-modal-close').focus();
 			loadModalAnimation(nftCard.dataset.nftSrc, nftCard.dataset.nftPreview, nftCard.dataset.nftTitle);
-			loadNftPrice(nftCard.dataset.nftFile);
+			loadNftPrice(nftCard.dataset.nftFile, listing ? Number(listing.price) : null);
 		});
 	});
 
-	const closeNftModal = () => nftModal.close();
+	const closeNftModal = () => {
+		if (!nftModal.open || nftModal.classList.contains('is-closing')) return;
+		nftModal.classList.add('is-closing');
+		window.setTimeout(() => {
+			if (nftModal.open) nftModal.close();
+		}, 220);
+	};
 	nftModal.querySelector('.nft-modal-close').addEventListener('click', closeNftModal);
-	nftModal.querySelector('.nft-modal-confirm').addEventListener('click', closeNftModal);
+	nftModalConfirm.addEventListener('click', async () => {
+		if (!activeSaleListing) {
+			closeNftModal();
+			return;
+		}
+		if (isWithdrawingListing) return;
+
+		const listing = activeSaleListing;
+		isWithdrawingListing = true;
+		nftModalConfirm.disabled = true;
+		nftModalConfirm.textContent = 'Снимаем…';
+		nftModalActionStatus.hidden = true;
+		try {
+			const { data: cancelledListing, error } = await supabaseClient.rpc('cancel_nft_listing', {
+				p_listing_id: listing.id,
+				p_seller_telegram_id: currentUser.id
+			});
+			if (error) throw error;
+			if (!cancelledListing || cancelledListing.status !== 'cancelled') {
+				throw new Error('Supabase не подтвердил снятие объявления.');
+			}
+
+			userSaleListings = userSaleListings.filter((item) => String(item.id) !== String(listing.id));
+			userNftCollection = normalizeUserNfts([...userNftCollection, listing.nft_data]);
+			supabaseAccountProfile = { ...supabaseAccountProfile, nfts: userNftCollection };
+			document.dispatchEvent(new CustomEvent('vyrn:supabase-profile-loaded', { detail: supabaseAccountProfile }));
+			profileNftTabs?.querySelector('[data-profile-view="nft"]')?.click();
+			closeNftModal();
+			refreshSupabaseAccountProfile().catch((refreshError) => console.error('Could not refresh profile after cancelling listing:', refreshError));
+		} catch (error) {
+			nftModalActionStatus.textContent = error.message || 'Не удалось снять объявление.';
+			nftModalActionStatus.hidden = false;
+			nftModalConfirm.disabled = false;
+			nftModalConfirm.textContent = 'СНЯТЬ С ПРОДАЖИ';
+		} finally {
+			isWithdrawingListing = false;
+		}
+	});
 	nftModal.addEventListener('click', (event) => {
 		if (event.target === nftModal) {
 			closeNftModal();

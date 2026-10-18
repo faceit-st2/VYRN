@@ -7,17 +7,21 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=market-search-spacing-20261017">
+  <link rel="stylesheet" href="style.css?v=seller-profile-20261018">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=supabase-telegram-profile-20261018" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js" defer></script>
+  <script src="supabase-config.js?v=admin-gift-catalog-20261018"></script>
+  <script src="nft-catalog.js?v=admin-gift-catalog-20261018"></script>
+  <script src="script.js?v=balance-cache-20261018" defer></script>
+  <script src="marketplace.js?v=seller-profile-20261018" defer></script>
 </head>
 <body class="market-screen">
   <header class="site-header">
     <a class="brand" href="index.html#home" aria-label="Рынок VYRN">РЫНОК</a>
-    <div class="star-balance" aria-label="Баланс: 100 звёзд">
+    <div class="star-balance" aria-label="Баланс загружается">
       <img src="stars.png" alt="" aria-hidden="true">
-      <span>100</span>
+      <span>…</span>
     </div>
   </header>
   <main class="market-page">
@@ -48,8 +52,49 @@
       <button class="market-trade-button" type="button" data-market-mode="purchases" aria-pressed="false">Покупки</button>
     </nav>
     <section class="market-grid" aria-label="Подарки на рынке"></section>
+    <p class="market-action-feedback" role="status" aria-live="polite" hidden></p>
     <p class="market-empty" hidden>Ничего не найдено</p>
   </main>
+  <dialog class="market-listing-dialog" aria-labelledby="market-listing-title">
+    <section class="market-listing-dialog-card">
+      <div class="market-listing-dialog-art">
+        <div class="market-listing-dialog-backdrop" aria-hidden="true" hidden></div>
+        <button class="market-listing-dialog-close" type="button" aria-label="Закрыть окно">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+        <div class="market-listing-dialog-animation" aria-hidden="true" hidden></div>
+        <img class="market-listing-dialog-image" alt="" hidden>
+        <div class="market-listing-dialog-heading">
+          <h2 class="market-listing-dialog-title" id="market-listing-title"></h2>
+          <p class="market-listing-dialog-collection">Коллекция VYRN</p>
+        </div>
+      </div>
+      <div class="market-listing-dialog-content">
+        <dl class="market-listing-dialog-metadata">
+          <div class="market-listing-dialog-owner-row">
+            <dt>Владелец</dt>
+            <dd>
+              <div class="market-listing-dialog-owner">
+                <a class="market-listing-dialog-avatar-link" aria-label="Профиль продавца">
+                  <span class="market-listing-dialog-avatar-fallback" aria-hidden="true"></span>
+                  <img class="market-listing-dialog-avatar" alt="" hidden>
+                </a>
+                <span class="market-listing-dialog-owner-copy">
+                  <a class="market-listing-dialog-owner-name"></a>
+                  <a class="market-listing-dialog-message" hidden>Написать</a>
+                </span>
+              </div>
+            </dd>
+          </div>
+          <div><dt>Коллекция</dt><dd>VYRN</dd></div>
+          <div><dt>Модель</dt><dd class="market-listing-dialog-model"></dd></div>
+          <div><dt>Цена</dt><dd class="market-listing-dialog-price"></dd></div>
+        </dl>
+        <p class="market-listing-dialog-status" role="status" hidden></p>
+        <button class="market-listing-dialog-action" type="button">КУПИТЬ</button>
+      </div>
+    </section>
+  </dialog>
   <nav class="bottom-nav" aria-label="Основная навигация">
     <span class="nav-indicator" aria-hidden="true"></span>
     <a class="nav-button" href="index.html#home">
