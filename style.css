@@ -3349,7 +3349,7 @@ body.chats-screen {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .site-header {
     min-height: 64px;
     padding: 0 1rem;
