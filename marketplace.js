@@ -236,10 +236,8 @@ if (marketGrid && marketSearch && marketCollectionFilter && marketSort && market
     const title = `${gift.name} #${gift.id}`;
     const seller = sellerProfiles.get(String(listing.seller_telegram_id));
     const sellerName = getProfileDisplayName(listing.seller_telegram_id);
-    const telegramUsername = seller?.telegram_username?.replace(/^@+/, '');
-    const canOpenTelegram = Boolean(telegramUsername && !telegramUsername.startsWith('local_'));
     const sellerProfileUrl = `profile.html?user=${encodeURIComponent(listing.seller_telegram_id)}`;
-    const telegramUrl = canOpenTelegram ? `https://t.me/${encodeURIComponent(telegramUsername)}` : '';
+    const chatUrl = `chats.html?user=${encodeURIComponent(listing.seller_telegram_id)}`;
 
     clearMarketAnimation();
     marketDialogImage.alt = title;
@@ -260,10 +258,8 @@ if (marketGrid && marketSearch && marketCollectionFilter && marketSort && market
     }
     marketDialogOwnerLink.textContent = sellerName;
     marketDialogOwnerLink.href = sellerProfileUrl;
-    marketDialogMessage.hidden = !canOpenTelegram;
-    marketDialogMessage.href = telegramUrl;
-    marketDialogMessage.target = '_blank';
-    marketDialogMessage.rel = 'noopener noreferrer';
+    marketDialogMessage.hidden = false;
+    marketDialogMessage.href = chatUrl;
 
     const amount = document.createElement('span');
     amount.textContent = formatStars(listing.price);
@@ -373,8 +369,6 @@ if (marketGrid && marketSearch && marketCollectionFilter && marketSort && market
 
   const buyListing = async (listing) => {
     if (!marketTelegramUser || isProcessingListing) return;
-    const confirmed = window.confirm(`Купить ${listing.nft_data.name} #${listing.nft_data.id} за ${formatStars(listing.price)} звёзд?`);
-    if (!confirmed) return;
     isProcessingListing = true;
     marketDialogAction.disabled = true;
     marketDialogStatus.textContent = 'Покупаем NFT…';
@@ -393,7 +387,6 @@ if (marketGrid && marketSearch && marketCollectionFilter && marketSort && market
       await refreshCurrentProfile();
       await loadListings();
       marketListingDialog.close();
-      setFeedback(`Куплено: ${listing.nft_data.name} #${listing.nft_data.id}. Списано ${formatStars(listing.price)} звёзд.`);
     } catch (error) {
       setFeedback(error.message || 'Не удалось купить NFT.', true);
       marketDialogStatus.textContent = error.message || 'Не удалось купить NFT.';

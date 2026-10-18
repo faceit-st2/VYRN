@@ -131,17 +131,38 @@ const profileDataFromSupabase = (profile) => ({
 });
 const publicProfilePage = document.querySelector('.profile-page:not(.player-profile-page)');
 if (publicProfilePage && isViewingOtherProfile) {
+	publicProfilePage.classList.add('is-public-profile');
 	const editButton = publicProfilePage.querySelector('.profile-edit-button');
+	const actions = publicProfilePage.querySelector('.public-profile-actions');
+	const messageAction = actions?.querySelector('[data-public-action="message"]');
 	const nameElement = publicProfilePage.querySelector('.profile-name');
 	const detailValues = [...publicProfilePage.querySelectorAll('.profile-detail-value')];
 	const avatarImage = publicProfilePage.querySelector('.profile-avatar-image');
+	const phoneRow = publicProfilePage.querySelector('.public-profile-phone-row');
+	const phoneValue = publicProfilePage.querySelector('.public-profile-phone');
+	const birthdayRow = publicProfilePage.querySelector('.public-profile-birthday-row');
+	const birthdayValue = publicProfilePage.querySelector('.public-profile-birthday');
 	if (editButton) editButton.hidden = true;
+	if (actions) actions.hidden = false;
 	const renderPublicProfile = (profile) => {
 		if (String(profile?.telegram_id) !== String(profileOwnerId)) return;
 		const profileData = profileDataFromSupabase(profile);
 		nameElement.textContent = [profileData.firstName, profileData.lastName].filter(Boolean).join(' ');
 		if (detailValues[0]) detailValues[0].textContent = profileData.username;
 		if (detailValues[1]) detailValues[1].textContent = profileData.about;
+		const phone = profileData.phone.trim();
+		phoneRow.hidden = !phone;
+		phoneValue.textContent = phone;
+		const birthday = profileData.birthday;
+		birthdayRow.hidden = !birthday;
+		birthdayValue.textContent = birthday
+			? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+				.format(new Date(`${birthday}T00:00:00`)).replace(/\.$/, '')
+			: '';
+		if (messageAction) {
+			messageAction.hidden = false;
+			messageAction.href = `chats.html?user=${encodeURIComponent(profileOwnerId)}`;
+		}
 		if (profileData.avatar) {
 			avatarImage.src = profileData.avatar;
 			avatarImage.hidden = false;
@@ -1341,7 +1362,7 @@ if (chatsPage && chatsSearchInput) {
 	let pullStart = null;
 	const filterChats = () => {
 		const query = chatsSearchInput.value.trim().toLocaleLowerCase('ru-RU');
-		chatRows.forEach((row) => {
+		chatsPage.querySelectorAll('.chat-row').forEach((row) => {
 			const searchableText = `${row.querySelector('.chat-name').textContent} ${row.querySelector('.chat-message').textContent}`;
 			row.hidden = !searchableText.toLocaleLowerCase('ru-RU').includes(query);
 		});
@@ -1388,10 +1409,13 @@ if (chatsPage && chatsSearchInput) {
 }
 
 if (chatRows.length && conversationDialog) {
+	const chatList = chatsPage.querySelector('.chat-list');
+	const chatsStatus = chatsPage.querySelector('.chats-status');
 	const conversationScreen = conversationDialog.querySelector('.conversation-screen');
 	const conversationProfile = conversationDialog.querySelector('.conversation-profile');
 	const conversationMessages = conversationDialog.querySelector('.conversation-messages');
 	const conversationMessageList = conversationDialog.querySelector('.conversation-message-list');
+	const conversationStatus = conversationDialog.querySelector('.conversation-status');
 	const conversationPeerName = conversationDialog.querySelector('.conversation-peer-name');
 	const conversationPeerStatus = conversationDialog.querySelector('.conversation-peer-status');
 	const conversationAvatarSlot = conversationDialog.querySelector('.conversation-avatar-slot');
@@ -1404,6 +1428,8 @@ if (chatRows.length && conversationDialog) {
 	const messageActionScrim = conversationDialog.querySelector('.message-action-scrim');
 	const messageActionMenu = conversationDialog.querySelector('.message-action-menu');
 	const messageDeleteAction = conversationDialog.querySelector('.message-delete-action');
+	const chatSupabase = window.VYRN_SUPABASE_CLIENT;
+	const chatCurrentUser = window.VYRN_CURRENT_USER;
 	const favoritesChatIndex = chatRows.findIndex((row) => row.dataset.chatType === 'favorites');
 	const favoritesStorageKey = 'vyrn.favorites.messages.v1';
 	const playerProfileName = conversationProfile.querySelector('.profile-name');
@@ -1432,6 +1458,13 @@ if (chatRows.length && conversationDialog) {
 		favoriteMessages
 	];
 	let activeChatIndex = -1;
+	let activeDirectChat = null;
+	let activeDirectChannel = null;
+	let isSendingDirectMessage = false;
+	const directChats = new Map();
+	const knownDirectConversationIds = new Set();
+	let pendingDirectMessages = [];
+	let directChatUpdatesChannel = null;
 	let pendingDeleteIndex = -1;
 	let activeMessageBubble;
 	let activeMessageRow;
@@ -1443,14 +1476,14 @@ if (chatRows.length && conversationDialog) {
 
 	const renderConversationMessages = (animateLatest = false) => {
 		conversationMessageList.replaceChildren();
-		const messages = conversationThreads[activeChatIndex];
+		const messages = activeDirectChat?.messages || conversationThreads[activeChatIndex] || [];
 		let latestMessageRow;
 		messages.forEach((message, index) => {
 			const row = document.createElement('article');
 			const isAnimatedMessage = animateLatest && index === messages.length - 1;
 			row.className = `conversation-message${message.outgoing ? ' is-outgoing' : ' is-incoming'}${isAnimatedMessage ? ' is-appearance-pending' : ''}`;
-			row.tabIndex = message.outgoing ? 0 : -1;
-			if (message.outgoing) {
+			row.tabIndex = message.outgoing && activeChatIndex === favoritesChatIndex ? 0 : -1;
+			if (message.outgoing && activeChatIndex === favoritesChatIndex) {
 				row.setAttribute('aria-label', `Сообщение: ${message.text}`);
 				row.setAttribute('aria-haspopup', 'menu');
 			}
@@ -1460,7 +1493,7 @@ if (chatRows.length && conversationDialog) {
 
 			const bubble = document.createElement('div');
 			bubble.className = 'conversation-bubble';
-			if (message.outgoing) {
+			if (message.outgoing && activeChatIndex === favoritesChatIndex) {
 				let holdTimer;
 				let startPoint;
 				let longPressTriggered = false;
@@ -1581,6 +1614,298 @@ if (chatRows.length && conversationDialog) {
 			conversationMessages.scrollTop = conversationMessages.scrollHeight;
 		}
 	};
+	const formatDirectChatTime = (value) => value
+		? new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+		: '';
+	const getDirectChatPeerName = (chat) => [
+		chat.peer.profile_first_name || chat.peer.telegram_first_name,
+		chat.peer.profile_last_name || chat.peer.telegram_last_name
+	].filter(Boolean).join(' ') || chat.peer.nickname || `ID ${chat.peerId}`;
+	const setChatsStatus = (message = '') => {
+		chatsStatus.textContent = message;
+		chatsStatus.hidden = !message;
+	};
+	const setConversationStatus = (message = '') => {
+		conversationStatus.textContent = message;
+		conversationStatus.hidden = !message;
+	};
+	const updateDirectChatRow = (chat, moveToTop = false) => {
+		if (!chat.row) {
+			const row = document.createElement('button');
+			row.className = 'chat-row direct-chat-row';
+			row.type = 'button';
+			row.dataset.chatType = 'direct';
+			row.dataset.chatId = String(chat.id);
+			const avatar = document.createElement('span');
+			avatar.className = 'chat-avatar direct-chat-avatar';
+			const initials = getDirectChatPeerName(chat).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => [...part][0]).join('').toLocaleUpperCase('ru-RU') || 'V';
+			avatar.textContent = initials;
+			if (chat.peer.photo_url) {
+				const image = document.createElement('img');
+				image.className = 'chat-avatar-image';
+				image.src = chat.peer.photo_url;
+				image.alt = '';
+				image.onerror = () => { avatar.textContent = initials; };
+				avatar.replaceChildren(image);
+			}
+			const copy = document.createElement('span');
+			copy.className = 'chat-copy';
+			const heading = document.createElement('span');
+			heading.className = 'chat-heading';
+			const name = document.createElement('span');
+			name.className = 'chat-name';
+			const time = document.createElement('span');
+			time.className = 'chat-time';
+			const preview = document.createElement('span');
+			preview.className = 'chat-preview';
+			const message = document.createElement('span');
+			message.className = 'chat-message';
+			heading.append(name, time);
+			preview.append(message);
+			copy.append(heading, preview);
+			row.append(avatar, copy);
+			row.addEventListener('click', () => openDirectChat(chat));
+			chat.row = row;
+		}
+
+		const name = chat.row.querySelector('.chat-name');
+		const time = chat.row.querySelector('.chat-time');
+		const message = chat.row.querySelector('.chat-message');
+		name.textContent = getDirectChatPeerName(chat);
+		time.textContent = formatDirectChatTime(chat.lastMessageAt);
+		message.textContent = chat.messages.at(-1)?.text || 'Начните переписку';
+		if (!chat.row.isConnected) chatList.append(chat.row);
+		if (moveToTop) {
+			const firstDirectRow = [...chatList.querySelectorAll('.chat-row[data-chat-type="direct"]')]
+				.find((row) => row !== chat.row);
+			if (firstDirectRow) chatList.insertBefore(chat.row, firstDirectRow);
+		}
+	};
+	const addDirectMessage = (chat, record, animateLatest = false) => {
+		if (chat.messages.some((message) => String(message.id) === String(record.id))) return;
+		const message = {
+			id: record.id,
+			text: record.body,
+			time: formatDirectChatTime(record.created_at),
+			createdAt: record.created_at,
+			outgoing: String(record.sender_telegram_id) === String(chatCurrentUser.id)
+		};
+		chat.messages.push(message);
+		chat.messages.sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt) || Number(left.id) - Number(right.id));
+		chat.lastMessageAt = record.created_at;
+		updateDirectChatRow(chat, true);
+		if (String(activeDirectChat?.id) === String(chat.id)) renderConversationMessages(animateLatest);
+	};
+	const closeDirectSubscription = () => {
+		if (activeDirectChannel && chatSupabase) chatSupabase.removeChannel(activeDirectChannel);
+		activeDirectChannel = null;
+	};
+	const openDirectChat = (chat) => {
+		closeDirectSubscription();
+		activeChatIndex = -1;
+		activeDirectChat = chat;
+		setConversationStatus('');
+		const name = getDirectChatPeerName(chat);
+		const avatar = document.createElement('span');
+		avatar.className = 'chat-avatar direct-chat-avatar';
+		avatar.textContent = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => [...part][0]).join('').toLocaleUpperCase('ru-RU') || 'V';
+		if (chat.peer.photo_url) {
+			const image = document.createElement('img');
+			image.className = 'chat-avatar-image';
+			image.src = chat.peer.photo_url;
+			image.alt = '';
+			image.onerror = () => {
+				avatar.textContent = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => [...part][0]).join('').toLocaleUpperCase('ru-RU') || 'V';
+			};
+			avatar.replaceChildren(image);
+		}
+		const headerAvatar = avatar.cloneNode(true);
+		headerAvatar.classList.add('conversation-peer-avatar');
+		headerAvatar.setAttribute('aria-hidden', 'true');
+		conversationAvatarSlot.replaceChildren(headerAvatar);
+		const profileAvatar = conversationProfile.querySelector('.profile-avatar');
+		const profileAvatarArt = avatar.cloneNode(true);
+		profileAvatarArt.classList.add('player-profile-avatar-art');
+		profileAvatar.replaceChildren(profileAvatarArt);
+		conversationPeerName.textContent = name;
+		conversationPeerStatus.textContent = 'личный чат';
+		playerProfileName.textContent = name;
+		playerProfileStatus.textContent = 'пользователь VYRN';
+		playerProfileUsername.textContent = chat.peer.nickname ? `@${chat.peer.nickname}` : '';
+		playerProfileBio.textContent = chat.peer.about || '';
+		conversationReadonlyNotice.hidden = true;
+		conversationComposer.classList.remove('conversation-readonly');
+		conversationAttach.hidden = true;
+		conversationAttach.disabled = true;
+		conversationInputShell.hidden = false;
+		conversationInput.disabled = false;
+		conversationSend.hidden = false;
+		conversationSend.disabled = false;
+		conversationDialog.setAttribute('aria-label', `Переписка: ${name}`);
+		showConversationProfile(false);
+		renderConversationMessages();
+		if (!conversationDialog.open) conversationDialog.showModal();
+		conversationInput.focus();
+		activeDirectChannel = chatSupabase.channel(`direct-chat-${chat.id}`)
+			.on('postgres_changes', {
+				event: 'INSERT',
+				schema: 'public',
+				table: 'direct_messages',
+				filter: `conversation_id=eq.${chat.id}`
+			}, (payload) => addDirectMessage(chat, payload.new))
+			.subscribe();
+	};
+	const fetchDirectChats = async () => {
+		if (!chatSupabase || !chatCurrentUser) return;
+		const { data: conversations, error: conversationsError } = await chatSupabase
+			.from('direct_conversations')
+			.select('*')
+			.or(`participant_a.eq.${chatCurrentUser.id},participant_b.eq.${chatCurrentUser.id}`)
+			.order('last_message_at', { ascending: false });
+		if (conversationsError) throw conversationsError;
+		const conversationIds = (conversations || []).map((conversation) => conversation.id);
+		conversationIds.forEach((id) => knownDirectConversationIds.add(String(id)));
+		if (!conversationIds.length) {
+			setChatsStatus('');
+			return;
+		}
+
+		const peerIds = [...new Set(conversations.map((conversation) => String(
+			String(conversation.participant_a) === String(chatCurrentUser.id) ? conversation.participant_b : conversation.participant_a
+		)))];
+		const [profilesResult, messagesResult] = await Promise.all([
+			chatSupabase.from('telegram_profiles').select('telegram_id, telegram_username, telegram_first_name, telegram_last_name, profile_first_name, profile_last_name, nickname, about, photo_url').in('telegram_id', peerIds),
+			chatSupabase.from('direct_messages').select('*').in('conversation_id', conversationIds).order('created_at', { ascending: true }).order('id', { ascending: true }).limit(2000)
+		]);
+		if (profilesResult.error) throw profilesResult.error;
+		if (messagesResult.error) throw messagesResult.error;
+		const profiles = new Map((profilesResult.data || []).map((profile) => [String(profile.telegram_id), profile]));
+		const messagesByConversation = new Map(conversationIds.map((id) => [String(id), []]));	
+		(messagesResult.data || []).forEach((record) => {
+			const chat = conversations.find((conversation) => String(conversation.id) === String(record.conversation_id));
+			if (!chat) return;
+			const messages = messagesByConversation.get(String(record.conversation_id));
+			messages.push({
+				id: record.id,
+				text: record.body,
+				time: formatDirectChatTime(record.created_at),
+				createdAt: record.created_at,
+				outgoing: String(record.sender_telegram_id) === String(chatCurrentUser.id)
+			});
+		});
+
+		(conversations || []).forEach((conversation) => {
+			const peerId = String(conversation.participant_a) === String(chatCurrentUser.id) ? conversation.participant_b : conversation.participant_a;
+			const peer = profiles.get(String(peerId));
+			if (!peer) return;
+			const chat = directChats.get(String(conversation.id)) || { id: conversation.id, messages: [] };
+			chat.peerId = peerId;
+			chat.peer = peer;
+			chat.messages = messagesByConversation.get(String(conversation.id)) || [];
+			chat.lastMessageAt = conversation.last_message_at || conversation.created_at;
+			directChats.set(String(chat.id), chat);
+			updateDirectChatRow(chat);
+		});
+		setChatsStatus('');
+	};
+	let directChatsLoadPromise = null;
+	const loadDirectChats = () => {
+		if (!directChatsLoadPromise) {
+			directChatsLoadPromise = fetchDirectChats().finally(() => { directChatsLoadPromise = null; });
+		}
+		return directChatsLoadPromise;
+	};
+	const flushPendingDirectMessages = () => {
+		const pending = pendingDirectMessages;
+		pendingDirectMessages = [];
+		pending.forEach((record) => {
+			const chat = directChats.get(String(record.conversation_id));
+			if (chat) addDirectMessage(chat, record);
+		});
+	};
+	const subscribeDirectChatUpdates = () => {
+		if (!chatSupabase || !chatCurrentUser) return;
+		directChatUpdatesChannel = chatSupabase.channel(`direct-chat-updates-${chatCurrentUser.id}`)
+			.on('postgres_changes', {
+				event: 'INSERT',
+				schema: 'public',
+				table: 'direct_conversations'
+			}, (payload) => {
+				const conversation = payload.new;
+				if (![conversation.participant_a, conversation.participant_b].some((id) => String(id) === String(chatCurrentUser.id))) return;
+				knownDirectConversationIds.add(String(conversation.id));
+				loadDirectChats().then(async () => {
+					if (!directChats.has(String(conversation.id))) await loadDirectChats();
+					flushPendingDirectMessages();
+				}).catch((error) => setChatsStatus(error.message || 'Не удалось обновить список чатов.'));
+			})
+			.on('postgres_changes', {
+				event: 'UPDATE',
+				schema: 'public',
+				table: 'direct_conversations'
+			}, (payload) => {
+				const conversation = payload.new;
+				const chat = directChats.get(String(conversation.id));
+				if (!chat || ![conversation.participant_a, conversation.participant_b].some((id) => String(id) === String(chatCurrentUser.id))) return;
+				chat.lastMessageAt = conversation.last_message_at;
+				updateDirectChatRow(chat, true);
+			})
+			.on('postgres_changes', {
+				event: 'INSERT',
+				schema: 'public',
+				table: 'direct_messages'
+			}, (payload) => {
+				const record = payload.new;
+				const chat = directChats.get(String(record.conversation_id));
+				if (chat) addDirectMessage(chat, record);
+				else if (knownDirectConversationIds.has(String(record.conversation_id))) pendingDirectMessages.push(record);
+			})
+			.subscribe((status) => {
+				if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+					setChatsStatus('Не удалось подключить обновления чатов в реальном времени.');
+				}
+			});
+	};
+	const openDirectChatWithUser = async (peerId) => {
+		if (!chatCurrentUser || !Number.isSafeInteger(peerId) || peerId < 1 || String(peerId) === String(chatCurrentUser.id)) return;
+		setChatsStatus('Открываем чат…');
+		const { data, error } = await chatSupabase.rpc('get_or_create_direct_conversation', {
+			p_requester_id: chatCurrentUser.id,
+			p_peer_id: peerId
+		});
+		if (error) throw error;
+		const conversation = Array.isArray(data) ? data[0] : data;
+		if (!conversation?.id) throw new Error('Supabase не вернул диалог.');
+		await loadDirectChats();
+		let chat = directChats.get(String(conversation.id));
+		if (!chat) {
+			await loadDirectChats();
+			chat = directChats.get(String(conversation.id));
+		}
+		if (!chat) throw new Error('Не удалось загрузить собеседника.');
+		setChatsStatus('');
+		openDirectChat(chat);
+	};
+	const startDirectChats = async () => {
+		if (!chatSupabase || !chatCurrentUser) {
+			if (new URLSearchParams(window.location.search).has('user')) {
+				setChatsStatus('Не удалось подключить чаты. Проверьте настройки Supabase.');
+			}
+			return;
+		}
+		subscribeDirectChatUpdates();
+		try {
+			await loadDirectChats();
+			flushPendingDirectMessages();
+			const requestedPeerId = Number(new URLSearchParams(window.location.search).get('user'));
+			if (Number.isSafeInteger(requestedPeerId) && requestedPeerId > 0) {
+				await openDirectChatWithUser(requestedPeerId);
+			}
+		} catch (error) {
+			console.error('Could not load direct chats:', error);
+			setChatsStatus('Не удалось загрузить чаты. Проверьте supabase/chat.sql.');
+		}
+	};
 
 	const showConversationProfile = (showProfile) => {
 		conversationScreen.hidden = showProfile;
@@ -1589,6 +1914,8 @@ if (chatRows.length && conversationDialog) {
 
 	chatRows.forEach((chatRow, index) => {
 		chatRow.addEventListener('click', () => {
+			closeDirectSubscription();
+			activeDirectChat = null;
 			activeChatIndex = index;
 			const name = chatRow.querySelector('.chat-name').textContent.replace(/\s+/g, ' ').trim();
 			const channelBadge = chatRow.querySelector('.channel-verified');
@@ -1654,8 +1981,40 @@ if (chatRows.length && conversationDialog) {
 		renderConversationMessages(true);
 		conversationInput.focus();
 	};
+	const sendDirectMessage = async () => {
+		const chat = activeDirectChat;
+		const text = conversationInput.value.trim();
+		if (!chat || !text || isSendingDirectMessage || !chatSupabase) return;
 
-	conversationSend.addEventListener('click', sendFavoriteMessage);
+		isSendingDirectMessage = true;
+		conversationInput.disabled = true;
+		conversationSend.disabled = true;
+		setConversationStatus('');
+		try {
+			const { data, error } = await chatSupabase
+				.from('direct_messages')
+				.insert({
+					conversation_id: chat.id,
+					sender_telegram_id: chatCurrentUser.id,
+					body: text
+				})
+				.select('*')
+				.single();
+			if (error) throw error;
+			if (!data?.id) throw new Error('Supabase не подтвердил отправку сообщения.');
+			conversationInput.value = '';
+			addDirectMessage(chat, data, true);
+			conversationInput.focus();
+		} catch (error) {
+			setConversationStatus(error.message || 'Не удалось отправить сообщение. Проверьте supabase/chat.sql.');
+		} finally {
+			isSendingDirectMessage = false;
+			conversationInput.disabled = false;
+			conversationSend.disabled = false;
+		}
+	};
+
+	conversationSend.addEventListener('click', () => activeDirectChat ? sendDirectMessage() : sendFavoriteMessage());
 	const closeMessageActionMenu = (restoreFocus = false) => {
 		messageActionScrim.hidden = true;
 		messageActionMenu.hidden = true;
@@ -1698,7 +2057,8 @@ if (chatRows.length && conversationDialog) {
 	conversationInput.addEventListener('keydown', (event) => {
 		if (event.key === 'Enter') {
 			event.preventDefault();
-			sendFavoriteMessage();
+			if (activeDirectChat) sendDirectMessage();
+			else sendFavoriteMessage();
 		}
 	});
 
@@ -1706,9 +2066,12 @@ if (chatRows.length && conversationDialog) {
 	conversationDialog.querySelector('.conversation-peer').addEventListener('click', () => showConversationProfile(true));
 	conversationDialog.querySelector('.player-profile-back').addEventListener('click', () => showConversationProfile(false));
 	conversationDialog.addEventListener('close', () => {
+		closeDirectSubscription();
+		activeDirectChat = null;
 		showConversationProfile(false);
 		activeChatIndex = -1;
 	});
+	startDirectChats();
 }
 
 const profileSummary = document.querySelector('.profile-summary');

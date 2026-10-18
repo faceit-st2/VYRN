@@ -1352,6 +1352,23 @@ body.chats-screen {
   font-weight: 700;
 }
 
+.direct-chat-avatar {
+  background: #e8f4fb;
+  color: #2586e8;
+  font-size: 15px;
+}
+
+.chats-status {
+  width: min(100%, 720px);
+  box-sizing: border-box;
+  margin: 10px auto;
+  padding: 0 10px;
+  color: #a33c3c;
+  font-size: 13px;
+}
+
+.chats-status[hidden] { display: none; }
+
 .chat-avatar-image {
   display: block;
   width: 100%;
@@ -1743,6 +1760,24 @@ body.chats-screen {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.48) 52px, rgba(0, 0, 0, 0.86) 104px, #000 144px, #000 calc(100% - 144px), rgba(0, 0, 0, 0.86) calc(100% - 104px), rgba(0, 0, 0, 0.48) calc(100% - 52px), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.48) 52px, rgba(0, 0, 0, 0.86) 104px, #000 144px, #000 calc(100% - 144px), rgba(0, 0, 0, 0.86) calc(100% - 104px), rgba(0, 0, 0, 0.48) calc(100% - 52px), transparent 100%);
 }
+
+.conversation-status {
+  position: absolute;
+  z-index: 2;
+  right: 14px;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  left: 14px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #a33c3c;
+  font-size: 13px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(25, 35, 45, 0.1);
+}
+
+.conversation-status[hidden] { display: none; }
 
 .conversation-messages::-webkit-scrollbar {
   display: none;
@@ -2220,6 +2255,73 @@ body.chats-screen {
     font-size: 13px;
     cursor: pointer;
 }
+
+.profile-page.is-public-profile {
+  padding: 56px 20px 40px;
+  background: #f0f0f5;
+}
+
+.profile-page.is-public-profile ~ .bottom-nav { display: none; }
+
+.profile-page.is-public-profile .profile-content { width: min(100%, 600px); }
+.profile-page.is-public-profile .profile-avatar { width: 132px; height: 132px; }
+.profile-page.is-public-profile .profile-name { margin-top: 16px; font-size: 24px; }
+.profile-page.is-public-profile .profile-status { margin-top: 6px; color: #858992; }
+
+.public-profile-back {
+  position: absolute;
+  top: 18px;
+  left: 20px;
+  display: none;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  color: #17191f;
+  text-decoration: none;
+}
+
+.profile-page.is-public-profile .public-profile-back { display: grid; }
+
+.public-profile-back svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+.public-profile-back:focus-visible { outline: 2px solid #2586e8; outline-offset: 3px; }
+
+.public-profile-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 32px 0 26px;
+}
+
+.public-profile-actions[hidden] { display: none; }
+
+.public-profile-action {
+  display: flex;
+  min-width: 0;
+  min-height: 66px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #2586e8;
+  font: inherit;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.public-profile-action:hover { background: rgba(37, 134, 232, 0.07); }
+.public-profile-action:focus-visible { outline: 2px solid #2586e8; outline-offset: 2px; }
+.public-profile-action svg { width: 28px; height: 28px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.9; }
+.public-profile-action span { max-width: 100%; font-size: 11px; line-height: 1.2; overflow-wrap: anywhere; }
+.public-profile-action-feedback { margin: -12px 0 16px; color: #858992; font-size: 12px; }
+.public-profile-action-feedback[hidden] { display: none; }
 
 .market-screen {
   background: #f5f5f5;

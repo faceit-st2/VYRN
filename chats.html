@@ -7,13 +7,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=nft-sale-flow-20261018">
+  <link rel="stylesheet" href="style.css?v=direct-chats-20261018">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js?v=admin-gift-catalog-20261018"></script>
   <script src="nft-catalog.js?v=admin-gift-catalog-20261018"></script>
-  <script src="script.js?v=balance-cache-20261018" defer></script>
+  <script src="script.js?v=direct-chats-20261018" defer></script>
 </head>
 <body class="chats-screen">
   <header class="site-header">
@@ -30,6 +30,7 @@
         <input class="chats-search-input" type="search" placeholder="Поиск по чатам" aria-label="Поиск по чатам">
       </label>
     </div>
+    <p class="chats-status" role="status" aria-live="polite" hidden></p>
     <section class="chat-list" aria-label="Список чатов">
       <button class="chat-row" type="button" data-chat-type="channel">
         <span class="chat-avatar" aria-hidden="true"><img class="chat-avatar-image" src="vyrn_chat.jpg" alt=""></span>
@@ -75,6 +76,7 @@
         <span class="conversation-date">сегодня</span>
         <div class="conversation-message-list"></div>
       </div>
+      <p class="conversation-status" role="status" aria-live="polite" hidden></p>
       <div class="conversation-composer conversation-readonly">
         <div class="conversation-readonly-notice" role="status">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></svg>

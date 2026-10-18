@@ -4,16 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Профиль | VYRN</title>
-  <link rel="stylesheet" href="style.css?v=seller-profile-20261018">
+  <link rel="stylesheet" href="style.css?v=public-profile-actions-20261018">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js?v=admin-gift-catalog-20261018"></script>
   <script src="nft-catalog.js?v=admin-gift-catalog-20261018"></script>
-  <script src="script.js?v=seller-profile-20261018" defer></script>
+  <script src="script.js?v=public-profile-chat-20261018" defer></script>
 </head>
 <body>
   <main class="profile-page">
+    <a class="public-profile-back" href="market.html" aria-label="Назад к рынку">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+    </a>
     <button class="profile-edit-button" type="button" aria-label="Изменить профиль">Изм.</button>
     <div class="profile-content">
       <section class="profile-summary" aria-labelledby="profile-name">
@@ -23,6 +26,25 @@
         <h1 class="profile-name" id="profile-name"></h1>
         <p class="profile-status">в сети</p>
       </section>
+      <nav class="public-profile-actions" aria-label="Действия с пользователем" hidden>
+        <a class="public-profile-action" data-public-action="message" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5h-6L6 20v-4.2a2.5 2.5 0 0 1-2-2.3v-8Z" /></svg>
+          <span>Написать</span>
+        </a>
+        <button class="public-profile-action" data-public-action="gift" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10h18v11H3zM2 7h20v4H2zM12 7v14M12 7H8.5a2.5 2.5 0 1 1 2.5-2.5V7Zm0 0h3.5a2.5 2.5 0 1 0-2.5-2.5V7Z" /></svg>
+          <span>Подарить</span>
+        </button>
+        <button class="public-profile-action" data-public-action="block" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/></svg>
+          <span>Заблокировать</span>
+        </button>
+        <button class="public-profile-action" data-public-action="transfer" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3-3m-3 3 3 3" /></svg>
+          <span>Перевести</span>
+        </button>
+      </nav>
+      <p class="public-profile-action-feedback" role="status" hidden></p>
       <section class="profile-details" aria-label="Информация профиля">
         <div class="profile-detail">
           <h2 class="profile-detail-label">Имя пользователя</h2>
@@ -31,6 +53,14 @@
         <div class="profile-detail">
           <h2 class="profile-detail-label">О себе</h2>
           <p class="profile-detail-value">example description</p>
+        </div>
+        <div class="profile-detail public-profile-phone-row" hidden>
+          <h2 class="profile-detail-label">Мобильный</h2>
+          <p class="profile-detail-value public-profile-phone"></p>
+        </div>
+        <div class="profile-detail public-profile-birthday-row" hidden>
+          <h2 class="profile-detail-label">День рождения</h2>
+          <p class="profile-detail-value public-profile-birthday"></p>
         </div>
       </section>
       <div class="profile-nft-tabs" role="group" aria-label="Разделы коллекции">
